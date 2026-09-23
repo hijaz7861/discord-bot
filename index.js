@@ -10,7 +10,6 @@ const fs = require('fs');
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1552149298911641620';
-const PREFIX = '!'; 
 const dataFile = './data.json';
 
 // Load Database
@@ -28,17 +27,33 @@ const client = new Client({
   ] 
 });
 
+// --- AUTO SETUP FUNCTION ---
+async function setupServer(guild) {
+  try {
+    let welcomeChannel = guild.channels.cache.find(c => c.name === 'welcome' && c.type === ChannelType.GuildText);
+    if (!welcomeChannel) {
+      welcomeChannel = await guild.channels.create({ name: 'welcome', type: ChannelType.GuildText, reason: 'Auto-setup by bot' });
+      console.log(`Created #welcome in ${guild.name}`);
+    }
+    let memberRole = guild.roles.cache.find(r => r.name === 'Member');
+    if (!memberRole) {
+      memberRole = await guild.roles.create({ name: 'Member', reason: 'Auto-setup by bot' });
+      console.log(`Created @Member role in ${guild.name}`);
+    }
+  } catch (e) {
+    console.error(`Failed to setup ${guild.name}:`, e.message);
+  }
+}
+
 const commands = [
   new SlashCommandBuilder().setName('ping').setDescription('Check bot latency'),
   new SlashCommandBuilder().setName('help').setDescription('Show commands'),
   new SlashCommandBuilder().setName('serverinfo').setDescription('Show server info'),
   new SlashCommandBuilder().setName('userinfo').setDescription('Show user info').addUserOption(o => o.setName('user').setDescription('User').setRequired(false)),
   new SlashCommandBuilder().setName('avatar').setDescription('Show avatar').addUserOption(o => o.setName('user').setDescription('User').setRequired(false)),
-  new SlashCommandBuilder().setName('kick').setDescription('Kick a member').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
-  new SlashCommandBuilder().setName('ban').setDescription('Ban a member').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+  new SlashCommandBuilder().setName('kick').setDescription('Kick a member').addUserOption(o => o.setName('user').setDescription('User to kick').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+  new SlashCommandBuilder().setName('ban').setDescription('Ban a member').addUserOption(o => o.setName('user').setDescription('User to ban').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
   new SlashCommandBuilder().setName('clear').setDescription('Delete messages').addIntegerOption(o => o.setName('amount').setDescription('1-100').setRequired(true).setMinValue(1).setMaxValue(100)).setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-  new SlashCommandBuilder().setName('welcome').setDescription('Set welcome channel').addChannelOption(o => o.setName('channel').setDescription('Channel').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-  new SlashCommandBuilder().setName('autorole').setDescription('Set auto-role').addRoleOption(o => o.setName('role').setDescription('Role').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
   new SlashCommandBuilder().setName('balance').setDescription('Check your coins'),
   new SlashCommandBuilder().setName('daily').setDescription('Claim daily coins'),
   new SlashCommandBuilder().setName('ticket').setDescription('Create a support ticket'),
@@ -50,21 +65,23 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 (async () => { try { await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); console.log('Commands registered.'); } catch (e) { console.error(e); } })();
 
-client.once(Events.ClientReady, c => console.log(`Logged in as ${c.user.tag}`));
+client.once(Events.ClientReady, c => {
+  console.log(`Logged in as ${c.user.tag}`);
+  client.guilds.cache.forEach(guild => setupServer(guild));
+});
 
-// Auto-Role & Welcome
+client.on(Events.GuildCreate, guild => setupServer(guild));
+
 client.on(Events.GuildMemberAdd, async member => {
   const channel = member.guild.channels.cache.find(ch => ch.name === 'welcome');
   if (channel) {
     const embed = new EmbedBuilder().setTitle('Welcome!').setDescription(`Hello ${member}, welcome to **${member.guild.name}**!`).setThumbnail(member.user.displayAvatarURL()).setColor('Green');
     channel.send({ embeds: [embed] });
   }
-  // Auto Role (if configured in channel topic or just a default role name)
   const autoRole = member.guild.roles.cache.find(r => r.name === 'Member');
   if (autoRole) member.roles.add(autoRole).catch(() => {});
 });
 
-// Leveling System
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
   const userId = message.author.id;
@@ -78,7 +95,6 @@ client.on(Events.MessageCreate, async message => {
   saveDB();
 });
 
-// Music Player
 const queues = new Map();
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -91,7 +107,7 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.editReply(`Pong! ${sent.createdTimestamp - interaction.createdTimestamp}ms`);
   }
   if (commandName === 'help') {
-    await interaction.reply('Commands: /ping, /help, /serverinfo, /userinfo, /avatar, /kick, /ban, /clear, /welcome, /autorole, /balance, /daily, /ticket, /play, /skip, /stop');
+    await interaction.reply('Commands: /ping, /help, /serverinfo, /userinfo, /avatar, /kick, /ban, /clear, /balance, /daily, /ticket, /play, /skip, /stop');
   }
   if (commandName === 'serverinfo') {
     const g = interaction.guild;
@@ -121,14 +137,6 @@ client.on(Events.InteractionCreate, async interaction => {
     const amount = interaction.options.getInteger('amount');
     await interaction.channel.bulkDelete(amount, true);
     await interaction.reply({ content: `🧹 Deleted ${amount} messages.`, ephemeral: true });
-  }
-  if (commandName === 'welcome') {
-    const channel = interaction.options.getChannel('channel');
-    await interaction.reply(`✅ Welcome channel set to ${channel}`);
-  }
-  if (commandName === 'autorole') {
-    const role = interaction.options.getRole('role');
-    await interaction.reply(`✅ Auto-role set to ${role.name}`);
   }
   if (commandName === 'balance') {
     await interaction.reply(`💰 You have **${db.users[userId].coins}** coins!`);
@@ -169,7 +177,6 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// Ticket Close Button
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
   if (interaction.customId === 'close_ticket') {
