@@ -1,13 +1,18 @@
 require('dotenv').config();
 const {
   Client, GatewayIntentBits, Events, REST, Routes,
-  SlashCommandBuilder, EmbedBuilder
+  SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits
 } = require('discord.js');
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1552149298911641620';
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ 
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers
+  ] 
+});
 
 const commands = [
   new SlashCommandBuilder().setName('ping').setDescription('Check bot latency'),
@@ -20,7 +25,24 @@ const commands = [
   new SlashCommandBuilder()
     .setName('avatar')
     .setDescription('Show avatar')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(false))
+    .addUserOption(o => o.setName('user').setDescription('User').setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('kick')
+    .setDescription('Kick a member')
+    .addUserOption(o => o.setName('user').setDescription('User to kick').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+  new SlashCommandBuilder()
+    .setName('ban')
+    .setDescription('Ban a member')
+    .addUserOption(o => o.setName('user').setDescription('User to ban').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+  new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Delete multiple messages')
+    .addIntegerOption(o => o.setName('amount').setDescription('1-100').setRequired(true).setMinValue(1).setMaxValue(100))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -38,6 +60,20 @@ client.once(Events.ClientReady, c => {
   console.log(`Logged in as ${c.user.tag}`);
 });
 
+client.on(Events.GuildMemberAdd, member => {
+  const channel = member.guild.channels.cache.find(ch => ch.name === 'welcome');
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle('Welcome!')
+    .setDescription(`Hello ${member}, welcome to **${member.guild.name}**!`)
+    .setThumbnail(member.user.displayAvatarURL())
+    .setColor('Green')
+    .setTimestamp();
+  
+  channel.send({ embeds: [embed] });
+});
+
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   const { commandName } = interaction;
@@ -48,7 +84,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   if (commandName === 'help') {
-    await interaction.reply('Commands: /ping, /help, /serverinfo, /userinfo, /avatar');
+    await interaction.reply('Commands: /ping, /help, /serverinfo, /userinfo, /avatar, /kick, /ban, /clear');
   }
 
   if (commandName === 'serverinfo') {
@@ -82,6 +118,28 @@ client.on(Events.InteractionCreate, async interaction => {
       .setTitle(`${user.username}'s avatar`)
       .setImage(user.displayAvatarURL({ size: 1024 }));
     await interaction.reply({ embeds: [embed] });
+  }
+
+  if (commandName === 'kick') {
+    const user = interaction.options.getMember('user');
+    const reason = interaction.options.getString('reason') || 'No reason provided';
+    if (!user.kickable) return interaction.reply({ content: 'I cannot kick this user!', ephemeral: true });
+    await user.kick(reason);
+    await interaction.reply(`👢 Kicked **${user.user.tag}** for: ${reason}`);
+  }
+
+  if (commandName === 'ban') {
+    const user = interaction.options.getMember('user');
+    const reason = interaction.options.getString('reason') || 'No reason provided';
+    if (!user.bannable) return interaction.reply({ content: 'I cannot ban this user!', ephemeral: true });
+    await user.ban({ reason });
+    await interaction.reply(`🔨 Banned **${user.user.tag}** for: ${reason}`);
+  }
+
+  if (commandName === 'clear') {
+    const amount = interaction.options.getInteger('amount');
+    await interaction.channel.bulkDelete(amount, true);
+    await interaction.reply({ content: `🧹 Deleted ${amount} messages.`, ephemeral: true });
   }
 });
 
